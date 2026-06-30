@@ -1,9 +1,9 @@
 # vibe-coding-bench
 
 `creative-gen` is a content-generation service running in production. Its output
-has been **degrading**, and a relaunch is coming up. Your job: figure out what's
-going wrong, fix what you can, and ship the relaunch — **without making anything
-worse**.
+has been **degrading**, and a relaunch is coming up — it ships **reference-image
+mode**, which must not regress latency. Your job: figure out what's going wrong,
+fix what you can, and ship the relaunch — **without making anything worse**.
 
 This is a timeboxed working session (your interviewer will tell you how long).
 **It is not meant to be finished** — there is more here than anyone completes in
