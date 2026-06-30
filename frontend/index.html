@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>creative-gen</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 24px; max-width: 980px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #888; margin-bottom: 20px; }
+  .card { border: 1px solid #d0d0d0; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; background: Canvas; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=text] { padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px; min-width: 200px; background: Field; color: FieldText; }
+  button { padding: 6px 12px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.ghost { background: #6b7280; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hook { font-weight: 600; }
+  .meta { color: #888; font-size: 12px; }
+  .bad { color: #dc2626; font-weight: 600; }
+  pre { background: #111; color: #eee; padding: 8px 10px; border-radius: 6px; overflow:auto; font-size:12px; }
+  #status { margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>creative-gen</h1>
+<div class="sub">Internal creative-generation console. Generate a creative, then regenerate to iterate.</div>
+
+<div class="card">
+  <div class="row">
+    <input id="creator" type="text" placeholder="creator_id" value="c_018" />
+    <input id="brief" type="text" placeholder="brief" value="new running shoe drop" style="min-width:320px" />
+    <button onclick="doGenerate()">Generate</button>
+    <span id="genSpin" class="meta"></span>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <input id="refimgs" type="text" placeholder="reference_image_ids (comma separated, optional)" style="min-width:320px" />
+  </div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <button class="ghost" onclick="doRegenerate()">Regenerate last</button>
+    <button class="ghost" onclick="runBatch()">Regenerate x10</button>
+    <button class="ghost" onclick="loadItems()">List items</button>
+    <span id="batchSpin" class="meta"></span>
+  </div>
+</div>
+
+<div id="out"></div>
+<div id="status"></div>
+
+<script>
+const API = "";  // same origin via nginx proxy
+let lastItem = null;
+
+async function post(path, body) {
+  const r = await fetch(API + path, {
+    method: "POST",
+    headers: {"content-type": "application/json", "x-api-key": "sk_live_demo"},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error(`${r.status} ${t}`); }
+  return r.json();
+}
+async function get(path) {
+  const r = await fetch(API + path, {headers: {"x-api-key": "sk_live_demo"}});
+  if (!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
+
+function card(html) {
+  const d = document.createElement("div"); d.className = "card"; d.innerHTML = html;
+  document.getElementById("out").prepend(d);
+}
+
+async function doGenerate() {
+  const creator = document.getElementById("creator").value.trim();
+  const brief = document.getElementById("brief").value.trim();
+  const refs = document.getElementById("refimgs").value.trim()
+    ? document.getElementById("refimgs").value.split(",").map(s=>s.trim()).filter(Boolean) : [];
+  document.getElementById("genSpin").textContent = "…";
+  try {
+    const r = await post("/generate", {creator_id: creator, brief, reference_image_ids: refs});
+    lastItem = r;
+    card(`<div class="hook">${esc(r.hook)}</div><div>${esc(r.caption)}</div>
+          <div class="meta">item ${esc(r.item_id)} · creator ${esc(creator)}</div>`);
+  } catch (e) { card(`<div class="bad">error: ${esc(e.message)}</div>`); }
+  document.getElementById("genSpin").textContent = "";
+}
+
+async function doRegenerate() {
+  if (!lastItem) { card(`<div class="meta">generate something first</div>`); return; }
+  const creator = document.getElementById("creator").value.trim();
+  try {
+    const r = await post("/regenerate", {creator_id: creator, item_id: lastItem.item_id});
+    lastItem = r;
+    card(`<div class="hook">${esc(r.hook)}</div><div>${esc(r.caption)}</div>
+          <div class="meta">regenerated item ${esc(r.item_id)}</div>`);
+  } catch (e) { card(`<div class="bad">error: ${esc(e.message)}</div>`); }
+}
+
+async function runBatch() {
+  if (!lastItem) { card(`<div class="meta">generate something first</div>`); return; }
+  const spin = document.getElementById("batchSpin"); spin.textContent = "running 10…";
+  const creator = document.getElementById("creator").value.trim();
+  const t0 = performance.now();
+  let hooks = [];
+  for (let i=0;i<10;i++){ try { const r = await post("/regenerate",{creator_id:creator,item_id:lastItem.item_id}); hooks.push(r.hook); } catch(e){} }
+  const ms = Math.round(performance.now()-t0);
+  spin.textContent = "";
+  const drift = new Set(hooks).size;
+  card(`<div>10 regenerations in ${ms}ms · ${drift} distinct hooks</div>
+        <div class="meta">notice how the output drifts / degrades across regenerations</div>
+        <pre>${esc(hooks.join("\n"))}</pre>`);
+}
+
+async function loadItems() {
+  try {
+    const r = await get("/items?offset=0&limit=10");
+    card(`<div>items (page 1)</div><pre>${esc(JSON.stringify(r, null, 2))}</pre>`);
+  } catch (e) { card(`<div class="bad">error: ${esc(e.message)}</div>`); }
+}
+
+async function health() {
+  try { const r = await get("/healthz");
+    document.getElementById("status").innerHTML = `backend: ok · db items: <b>${r.db_items}</b>`;
+  } catch(e){ document.getElementById("status").innerHTML = `<span class="bad">backend unreachable: ${esc(e.message)}</span>`; }
+}
+function esc(s){ return String(s).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+health();
+</script>
+</body>
+</html>
